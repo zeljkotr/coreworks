@@ -1,0 +1,21 @@
+services:
+  coreworks-db:
+    image: postgres:17
+    container_name: coreworks-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: coreworks
+      POSTGRES_USER: coreworks_app
+      POSTGRES_PASSWORD: ${COREWORKS_DB_PASSWORD:?Set COREWORKS_DB_PASSWORD in the project .env file}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - coreworks_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coreworks_app -d coreworks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  coreworks_postgres_data:

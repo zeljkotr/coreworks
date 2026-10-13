@@ -1,0 +1,1 @@
+"""CoreWorks modular IT platform."""

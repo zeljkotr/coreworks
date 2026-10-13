@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Prijava · CoreWorks{% endblock %}
+{% block content %}
+<section class="card" style="max-width:440px;margin:4rem auto">
+  <h1>Dobrodošli u CoreWorks</h1>
+  <p class="muted">Prijavite se da biste pristupili IT platformi.</p>
+  <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label for="username">Korisničko ime</label>
+    <input id="username" name="username" required maxlength="40" autocomplete="username" autofocus>
+    <label for="password">Lozinka</label>
+    <input id="password" type="password" name="password" required autocomplete="current-password">
+    <button type="submit">Prijavi se</button>
+  </form>
+</section>
+{% endblock %}

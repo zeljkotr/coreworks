@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Administracija · CoreWorks{% endblock %}
+{% block content %}
+<h1>Korisnici</h1>
+<section class="card">
+  <table>
+    <thead><tr><th>ID</th><th>Korisnik</th><th>Uloga</th><th>Kreiran</th></tr></thead>
+    <tbody>
+    {% for user in users %}
+      <tr><td>{{ user.id }}</td><td>{{ user.username }}</td>
+          <td>{{ user.role }}</td><td>{{ user.created_at }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
