@@ -458,3 +458,76 @@ def guardian_scan_comparison(
         "findings": current_results,
         "resolved_findings": resolved_results,
     }
+
+
+@router.get("/trends")
+def guardian_risk_trends(
+    target: str,
+    limit: int = 30,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not target.strip() or len(target) > 100:
+        raise HTTPException(status_code=400, detail="Invalid target.")
+    if limit < 2 or limit > 100:
+        raise HTTPException(
+            status_code=400, detail="Limit must be between 2 and 100."
+        )
+
+    query = select(GuardianScan).where(GuardianScan.target == target.strip())
+    if getattr(current_user, "role", "user") != "admin":
+        query = query.where(GuardianScan.user_id == current_user.id)
+
+    scans = list(
+        db.scalars(
+            query.order_by(GuardianScan.scanned_at.desc())
+            .limit(limit)
+        ).all()
+    )
+    scans.reverse()
+
+    weights = {
+        "critical": 10,
+        "high": 7,
+        "medium": 4,
+        "low": 2,
+        "info": 0,
+    }
+    trends = []
+
+    for scan in scans:
+        findings = db.scalars(
+            select(GuardianFinding).where(
+                GuardianFinding.scan_id == scan.id
+            )
+        ).all()
+
+        severity_counts = {
+            "critical": 0, "high": 0, "medium": 0,
+            "low": 0, "info": 0,
+        }
+        score = 0
+
+        for finding in findings:
+            severity = (finding.severity or "info").lower()
+            if severity not in severity_counts:
+                severity = "info"
+            severity_counts[severity] += 1
+            score += weights[severity]
+
+        trends.append({
+            "id": scan.id,
+            "scanned_at": scan.scanned_at.isoformat(),
+            "hosts_checked": scan.hosts_checked,
+            "open_ports": scan.open_ports,
+            "findings_count": len(findings),
+            "severity_counts": severity_counts,
+            "risk_score": min(score, 100),
+        })
+
+    return {
+        "target": target.strip(),
+        "count": len(trends),
+        "scans": trends,
+        "risk_score_method": "Sum of finding severity weights, capped at 100.",
+    }

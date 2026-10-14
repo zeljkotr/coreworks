@@ -31,6 +31,14 @@ type Scan = {
 
 type HistoryItem = Omit<Scan, "findings">;
 
+type RiskTrend = {
+  id: number;
+  scanned_at: string;
+  risk_score: number;
+  findings_count: number;
+  open_ports: number;
+};
+
 type ComparisonFinding = Finding & {
   status: "new" | "resolved" | "unchanged";
 };
@@ -65,6 +73,31 @@ function GuardianContent() {
   const [result, setResult] = useState<Scan | null>(null);
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [trends, setTrends] = useState<RiskTrend[]>([]);
+  const [trendsLoading, setTrendsLoading] = useState(false);
+  const [trendsError, setTrendsError] = useState("");
+
+  async function loadTrends() {
+    const selectedTarget = target.trim();
+    if (!selectedTarget) {
+      setTrendsError("Enter a target IP or CIDR first.");
+      return;
+    }
+    setTrendsLoading(true);
+    setTrendsError("");
+    try {
+      const response = await apiFetch(
+        `/guardian/trends?target=${encodeURIComponent(selectedTarget)}`
+      );
+      if (!response.ok) throw new Error(await readError(response));
+      const data = await response.json();
+      setTrends(data.scans);
+    } catch (e) {
+      setTrendsError(e instanceof Error ? e.message : "Could not load risk trends.");
+    } finally {
+      setTrendsLoading(false);
+    }
+  }
 
   const loadHistory = useCallback(async () => {
     try {
@@ -209,6 +242,116 @@ function GuardianContent() {
           <p className="error-message" role="alert">{error}</p>
         </section>
       )}
+
+      <section className="card" style={{ marginTop: 20 }}>
+        <h2>Risk Trends</h2>
+        <p className="muted">
+          Track security exposure over time for a specific target.
+          Risk score is capped at 100.
+        </p>
+        <button
+          className="button"
+          disabled={trendsLoading || !target.trim()}
+          onClick={() => void loadTrends()}
+        >
+          {trendsLoading ? "Loading trends..." : "Load risk trends"}
+        </button>
+
+        {trendsError && (
+          <p className="error-message" role="alert" style={{ marginTop: 12 }}>
+            {trendsError}
+          </p>
+        )}
+
+        {trends.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "end",
+                gap: 8,
+                minHeight: 180,
+                overflowX: "auto",
+                padding: "12px 4px 0",
+                borderBottom: "1px solid var(--border, #888)",
+              }}
+              aria-label="Risk score by scan"
+            >
+              {trends.map((scan) => (
+                <div
+                  key={scan.id}
+                  title={`${new Date(scan.scanned_at).toLocaleString("en-GB")} — Risk score ${scan.risk_score}/100`}
+                  style={{
+                    minWidth: 42,
+                    flex: "1 0 42px",
+                    maxWidth: 76,
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ fontSize: 12, marginBottom: 5 }}>
+                    {scan.risk_score}
+                  </div>
+                  <div
+                    style={{
+                      height: `${Math.max(scan.risk_score, 2)}px`,
+                      minHeight: 3,
+                      maxHeight: 100,
+                      background:
+                        scan.risk_score >= 70
+                          ? "#b91c1c"
+                          : scan.risk_score >= 35
+                            ? "#d97706"
+                            : "#15803d",
+                      borderRadius: "4px 4px 0 0",
+                      margin: "0 auto",
+                      width: "70%",
+                    }}
+                  />
+                  <div style={{ fontSize: 11, marginTop: 6 }}>
+                    #{scan.id}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="muted" style={{ marginTop: 12 }}>
+              Green: 0–34 · Amber: 35–69 · Red: 70–100.
+              Scores are severity-weighted exposure indicators, not proof of exploitability.
+            </p>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {["Date", "Scan", "Risk score", "Findings", "Open ports"].map((heading) => (
+                      <th key={heading} style={{ textAlign: "left", padding: 8 }}>
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {trends.map((scan) => (
+                    <tr key={scan.id}>
+                      <td style={{ padding: 8 }}>
+                        {new Date(scan.scanned_at).toLocaleString("en-GB")}
+                      </td>
+                      <td style={{ padding: 8 }}>#{scan.id}</td>
+                      <td style={{ padding: 8 }}>{scan.risk_score}/100</td>
+                      <td style={{ padding: 8 }}>{scan.findings_count}</td>
+                      <td style={{ padding: 8 }}>{scan.open_ports}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {!trendsLoading && !trendsError && trends.length === 0 && (
+          <p className="muted" style={{ marginTop: 12 }}>
+            Enter a target and load its saved scan history.
+          </p>
+        )}
+      </section>
 
       <section className="card" style={{ marginTop: 20 }}>
         <h2>Scan History</h2>
