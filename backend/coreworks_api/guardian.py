@@ -1,9 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+import json
 import ipaddress
 import re
 import socket
 import ssl
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -107,7 +111,7 @@ def probe_tcp(host: str, port: int) -> bool:
 
 
 def parse_service_banner(banner: str, fallback: str) -> tuple[str, str]:
-    """Extract a product/version hint from a protocol banner or HTTP response."""
+    """Extract conservative product/version hints from service banners."""
     clean = " ".join(banner.replace("\x00", " ").split())[:500]
     if not clean:
         return fallback, "Unknown"
@@ -130,7 +134,6 @@ def parse_service_banner(banner: str, fallback: str) -> tuple[str, str]:
             return product, match.group(1)
 
     return fallback, "Unknown"
-
 
 def fingerprint_service(host: str, port: int) -> dict:
     """Perform a short, non-authenticated protocol greeting/version probe."""
@@ -456,6 +459,281 @@ def guardian_scan_comparison(
         "summary": counts,
         "findings": current_results,
         "resolved_findings": resolved_results,
+    }
+
+
+
+def _cpe_product_aliases(product: str) -> set[str]:
+    """Return conservative NVD CPE product-name aliases."""
+    import re
+
+    key = re.sub(r"[^a-z0-9]", "", (product or "").lower())
+    aliases = {
+        "openssh": {"openssh"},
+        "nginx": {"nginx"},
+        "apachehttpserver": {"http_server", "apache_http_server"},
+        "microsoftiis": {"internet_information_services", "iis"},
+        "openssl": {"openssl"},
+        "vsftpd": {"vsftpd"},
+        "proftpd": {"proftpd"},
+        "redis": {"redis"},
+        "postgresql": {"postgresql"},
+        "mysql": {"mysql"},
+    }
+    return aliases.get(key, {key} if key else set())
+
+
+def _version_tokens(value: str):
+    """Conservative token comparison for common software version strings."""
+    import re
+
+    return [
+        (0, int(token)) if token.isdigit() else (1, token.lower())
+        for token in re.findall(r"[0-9]+|[A-Za-z]+", value or "")
+    ]
+
+
+def _version_in_cpe_range(version: str, entry: dict) -> bool:
+    """Check exact CPE versions and NVD inclusive/exclusive boundaries."""
+    criteria = entry.get("criteria") or entry.get("cpe23Uri") or ""
+    parts = criteria.split(":")
+    cpe_version = parts[5] if len(parts) > 5 else "*"
+    actual = _version_tokens(version)
+
+    if not actual:
+        return False
+
+    if cpe_version not in ("*", "-", ""):
+        if _version_tokens(cpe_version) != actual:
+            return False
+
+    checks = (
+        ("versionStartIncluding", lambda a, b: a >= b),
+        ("versionStartExcluding", lambda a, b: a > b),
+        ("versionEndIncluding", lambda a, b: a <= b),
+        ("versionEndExcluding", lambda a, b: a < b),
+    )
+    for field, predicate in checks:
+        bound = entry.get(field)
+        if bound:
+            tokens = _version_tokens(bound)
+            if not tokens or not predicate(actual, tokens):
+                return False
+
+    return True
+
+
+def _cve_matches_cpe_version(cve: dict, product: str, version: str) -> bool:
+    """
+    Conservatively evaluate CPE expressions with three-valued logic.
+    Unknown OS/platform conditions do not automatically reject a product match.
+    A match is a potential candidate, not confirmation of vulnerability.
+    """
+    aliases = _cpe_product_aliases(product)
+    if not aliases or not version:
+        return False
+
+    configurations = cve.get("configurations")
+    if not isinstance(configurations, list) or not configurations:
+        return True
+
+    def evaluate_entry(entry: dict) -> tuple[bool | None, bool]:
+        criteria = entry.get("criteria") or entry.get("cpe23Uri") or ""
+        parts = criteria.split(":")
+        if len(parts) < 6:
+            return False, False
+
+        cpe_product = parts[4].lower()
+        part_type = parts[2].lower()
+
+        if cpe_product in aliases:
+            if entry.get("vulnerable") is False:
+                return False, True
+            return _version_in_cpe_range(version, entry), True
+
+        # We cannot evaluate an OS/hardware condition without host inventory.
+        if part_type in {"o", "h"}:
+            return None, False
+
+        # A different application product is not a match for this product.
+        return False, False
+
+    def combine(states: list[bool | None], operator: str) -> bool | None:
+        if not states:
+            return False
+        if operator == "AND":
+            if False in states:
+                return False
+            return True if all(s is True for s in states) else None
+        if True in states:
+            return True
+        return False if all(s is False for s in states) else None
+
+    def evaluate_node(node: dict) -> tuple[bool | None, bool]:
+        if not isinstance(node, dict):
+            return False, False
+
+        # Negated expressions cannot be safely established from product/version
+        # alone, so do not treat them as matches.
+        if node.get("negate") is True:
+            return False, False
+
+        operator = str(node.get("operator", "OR")).upper()
+        if operator not in {"AND", "OR"}:
+            operator = "OR"
+
+        terms = []
+        relevant = False
+
+        entries = node.get("cpeMatch", node.get("cpe_match", [])) or []
+        for entry in entries:
+            if isinstance(entry, dict):
+                state, is_relevant = evaluate_entry(entry)
+                terms.append(state)
+                relevant = relevant or is_relevant
+
+        children = node.get("children", node.get("nodes", [])) or []
+        for child in children:
+            if isinstance(child, dict):
+                state, is_relevant = evaluate_node(child)
+                terms.append(state)
+                relevant = relevant or is_relevant
+
+        return combine(terms, operator), relevant
+
+    for configuration in configurations:
+        if not isinstance(configuration, dict):
+            continue
+
+        nodes = configuration.get("nodes", [])
+        expressions = [
+            evaluate_node(node)
+            for node in nodes
+            if isinstance(node, dict)
+        ]
+
+        if not expressions and (
+            configuration.get("cpeMatch") or configuration.get("cpe_match")
+        ):
+            expressions.append(evaluate_node(configuration))
+
+        # Top-level configuration expressions are alternatives.
+        for state, relevant in expressions:
+            if relevant and state in (True, None):
+                return True
+
+    return False
+
+
+@router.get("/history/{scan_id}/vulnerabilities")
+def guardian_scan_vulnerabilities(
+    scan_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    scan = db.get(GuardianScan, scan_id)
+    if scan is None or (
+        getattr(current_user, "role", "user") != "admin"
+        and scan.user_id != current_user.id
+    ):
+        raise HTTPException(status_code=404, detail="Scan history entry not found.")
+
+    findings = db.scalars(
+        select(GuardianFinding).where(GuardianFinding.scan_id == scan.id)
+    ).all()
+
+    # Query at most five distinct, identifiable product/version pairs.
+    pairs = []
+    seen = set()
+    for finding in findings:
+        product = (finding.product or "").strip()
+        version = (finding.version or "").strip()
+        if not product or not version or version.lower() == "unknown":
+            continue
+        key = (product, version)
+        if key not in seen:
+            seen.add(key)
+            pairs.append(key)
+        if len(pairs) >= 5:
+            break
+
+    results = []
+    errors = []
+    checked = 0
+
+    for product, version in pairs:
+        params = urlencode({
+            "keywordSearch": f"{product} {version}",
+            "resultsPerPage": 5,
+        })
+        request = Request(
+            f"https://services.nvd.nist.gov/rest/json/cves/2.0?{params}",
+            headers={"User-Agent": "CoreWorks-Guardian/1.0"},
+        )
+        try:
+            with urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            checked += 1
+        except (URLError, TimeoutError, OSError, ValueError) as exc:
+            errors.append(
+                f"{product} {version}: NVD lookup failed ({type(exc).__name__})."
+            )
+            continue
+
+        for item in payload.get("vulnerabilities", []):
+            cve = item.get("cve", {})
+            if not _cve_matches_cpe_version(cve, product, version):
+                continue
+            descriptions = cve.get("descriptions", [])
+            description = next(
+                (d.get("value", "") for d in descriptions
+                 if d.get("lang") == "en"),
+                "No English description provided.",
+            )
+            metrics = cve.get("metrics", {})
+            severity = "Unknown"
+            score = None
+
+            for metric_name in (
+                "cvssMetricV40", "cvssMetricV31",
+                "cvssMetricV30", "cvssMetricV2",
+            ):
+                entries = metrics.get(metric_name, [])
+                if entries:
+                    data = entries[0].get("cvssData", {})
+                    severity = data.get("baseSeverity") or (
+                        entries[0].get("baseSeverity") or "Unknown"
+                    )
+                    score = data.get("baseScore")
+                    break
+
+            results.append({
+                "cve_id": cve.get("id", "Unknown"),
+                "description": description[:1000],
+                "severity": severity,
+                "cvss_score": score,
+                "url": (
+                    "https://nvd.nist.gov/vuln/detail/"
+                    + cve.get("id", "")
+                ),
+                "matched_product": product,
+                "detected_version": version,
+                "status": "potential_match",
+                "published": cve.get("published"),
+            })
+
+    return {
+        "scan_id": scan.id,
+        "target": scan.target,
+        "source": "NIST National Vulnerability Database (NVD)",
+        "checked_services": checked,
+        "results": results,
+        "errors": errors,
+        "notice": (
+            "Potential matches only. NVD keyword results do not confirm that "
+            "the installed package is affected. Verify OS, package release, "
+            "vendor advisories, and installed security patches."
+        ),
     }
 
 

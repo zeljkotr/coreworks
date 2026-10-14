@@ -1,6 +1,6 @@
 import pytest
 
-from coreworks_api.guardian import parse_target, validate_ports
+from coreworks_api.guardian import parse_target, validate_ports, parse_service_banner, _cve_matches_cpe_version
 
 
 def test_parse_single_private_ip():
@@ -139,3 +139,157 @@ def test_guardian_comparison_hides_another_users_scan():
 
     assert exc.value.status_code == 404
     db.scalars.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("banner", "fallback", "expected"),
+    [
+        ("SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.6", "SSH", ("OpenSSH", "10.2p1")),
+        ("nginx/1.26.2", "HTTP", ("nginx", "1.26.2")),
+        ("Apache/2.4.58", "HTTP", ("Apache HTTP Server", "2.4.58")),
+        ("OpenSSL/3.0.13", "HTTPS", ("OpenSSL", "3.0.13")),
+        ("unknown server banner", "HTTP", ("HTTP", "Unknown")),
+    ],
+)
+def test_parse_service_banner(banner, fallback, expected):
+    assert parse_service_banner(banner, fallback) == expected
+
+
+
+def test_guardian_cpe_exact_version_match():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*",
+                }]
+            }]
+        }]
+    }
+    assert _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")
+    assert not _cve_matches_cpe_version(cve, "OpenSSH", "9.7p1")
+
+
+def test_guardian_cpe_inclusive_version_end():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+                    "versionEndIncluding": "9.6p1",
+                }]
+            }]
+        }]
+    }
+    assert _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")
+    assert not _cve_matches_cpe_version(cve, "OpenSSH", "9.7p1")
+
+
+def test_guardian_cpe_exclusive_version_start():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+                    "versionStartExcluding": "9.6",
+                }]
+            }]
+        }]
+    }
+    assert not _cve_matches_cpe_version(cve, "OpenSSH", "9.6")
+    assert _cve_matches_cpe_version(cve, "OpenSSH", "9.7")
+
+
+def test_guardian_cpe_rejects_wrong_product():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:nginx:nginx:1.26.2:*:*:*:*:*:*:*",
+                }]
+            }]
+        }]
+    }
+    assert not _cve_matches_cpe_version(cve, "OpenSSH", "1.26.2")
+
+
+def test_guardian_cpe_recurses_into_children():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "operator": "OR",
+                "children": [{
+                    "cpeMatch": [{
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*",
+                    }]
+                }]
+            }]
+        }]
+    }
+    assert _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")
+
+
+def test_guardian_cpe_missing_configuration_remains_potential():
+    assert _cve_matches_cpe_version(
+        {"id": "CVE-2099-0001"}, "OpenSSH", "10.2p1"
+    )
+
+
+
+def test_guardian_cpe_and_requires_all_conditions():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "operator": "AND",
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*",
+                }, {
+                    "vulnerable": False,
+                    "criteria": "cpe:2.3:o:canonical:ubuntu_linux:22.04:*:*:*:*:*:*:*",
+                }],
+            }]
+        }]
+    }
+    # Unknown OS conditions retain a potential match, not a confirmed vulnerability.
+    assert _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")
+
+
+
+def test_guardian_cpe_or_accepts_matching_branch():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "operator": "OR",
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*",
+                }, {
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:nginx:nginx:1.26.2:*:*:*:*:*:*:*",
+                }],
+            }]
+        }]
+    }
+    assert _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")
+
+
+def test_guardian_cpe_negated_node_is_not_confirmed():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "operator": "OR",
+                "negate": True,
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*",
+                }],
+            }]
+        }]
+    }
+    assert not _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")

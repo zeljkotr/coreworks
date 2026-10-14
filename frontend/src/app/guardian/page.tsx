@@ -31,6 +31,28 @@ type Scan = {
 
 type HistoryItem = Omit<Scan, "findings">;
 
+type VulnerabilityMatch = {
+  cve_id: string;
+  description: string;
+  severity: string;
+  cvss_score: number | null;
+  url: string;
+  matched_product: string;
+  detected_version: string;
+  status: string;
+  published?: string | null;
+};
+
+type VulnerabilityReport = {
+  scan_id: number;
+  target: string;
+  source: string;
+  checked_services: number;
+  results: VulnerabilityMatch[];
+  errors: string[];
+  notice: string;
+};
+
 type RiskTrend = {
   id: number;
   scanned_at: string;
@@ -76,6 +98,29 @@ function GuardianContent() {
   const [trends, setTrends] = useState<RiskTrend[]>([]);
   const [trendsLoading, setTrendsLoading] = useState(false);
   const [trendsError, setTrendsError] = useState("");
+  const [vulnerabilityReport, setVulnerabilityReport] =
+    useState<VulnerabilityReport | null>(null);
+  const [vulnerabilitiesLoading, setVulnerabilitiesLoading] = useState(false);
+  const [vulnerabilitiesError, setVulnerabilitiesError] = useState("");
+
+  async function checkVulnerabilities(scanId: number) {
+    setVulnerabilitiesLoading(true);
+    setVulnerabilitiesError("");
+    setVulnerabilityReport(null);
+    try {
+      const response = await apiFetch(
+        `/guardian/history/${scanId}/vulnerabilities`
+      );
+      if (!response.ok) throw new Error(await readError(response));
+      setVulnerabilityReport(await response.json());
+    } catch (e) {
+      setVulnerabilitiesError(
+        e instanceof Error ? e.message : "Could not check known vulnerabilities."
+      );
+    } finally {
+      setVulnerabilitiesLoading(false);
+    }
+  }
 
   async function loadTrends() {
     const selectedTarget = target.trim();
@@ -120,6 +165,8 @@ function GuardianContent() {
     setError("");
     setComparison(null);
     setResult(null);
+    setVulnerabilityReport(null);
+    setVulnerabilitiesError("");
 
     try {
       const response = await apiFetch("/guardian/scan", {
@@ -564,6 +611,90 @@ function GuardianContent() {
             <strong>Completed:</strong>{" "}
             {new Date(result.scanned_at).toLocaleString("en-GB")}
           </p>
+
+          <button
+            className="button"
+            disabled={vulnerabilitiesLoading}
+            onClick={() => void checkVulnerabilities(result.id)}
+          >
+            {vulnerabilitiesLoading
+              ? "Checking NVD..."
+              : "Check for known vulnerabilities"}
+          </button>
+
+          {vulnerabilitiesError && (
+            <p className="error-message" role="alert" style={{ marginTop: 12 }}>
+              {vulnerabilitiesError}
+            </p>
+          )}
+
+          {vulnerabilityReport?.scan_id === result.id && (
+            <div style={{ marginTop: 18 }}>
+              <h3>Known Vulnerability Lookup</h3>
+              <p className="muted">
+                Source: {vulnerabilityReport.source}. Checked services:{" "}
+                {vulnerabilityReport.checked_services}.
+              </p>
+              <p>{vulnerabilityReport.notice}</p>
+
+              {vulnerabilityReport.errors.map((item, index) => (
+                <p className="error-message" role="alert" key={`${index}:${item}`}>
+                  {item}
+                </p>
+              ))}
+
+              {vulnerabilityReport.results.length === 0 ? (
+                <p>
+                  {vulnerabilityReport.errors.length > 0
+                    ? "The lookup was incomplete. No conclusion can be drawn from failed lookups."
+                    : "No potential matches were returned by NVD for the checked product/version keywords. This does not prove the software is free of vulnerabilities."}
+                </p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        {["CVE", "Severity", "CVSS", "Detected product / version", "Description", "Source"].map((heading) => (
+                          <th key={heading} style={{ textAlign: "left", padding: 10 }}>
+                            {heading}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vulnerabilityReport.results.map((item) => (
+                        <tr key={`${item.cve_id}:${item.matched_product}:${item.detected_version}`}>
+                          <td style={{ padding: 10, verticalAlign: "top" }}>
+                            <a href={item.url} target="_blank" rel="noopener noreferrer">
+                              {item.cve_id}
+                            </a>
+                            <div className="muted">Potential match</div>
+                          </td>
+                          <td style={{ padding: 10, verticalAlign: "top" }}>
+                            {item.severity}
+                          </td>
+                          <td style={{ padding: 10, verticalAlign: "top" }}>
+                            {item.cvss_score ?? "N/A"}
+                          </td>
+                          <td style={{ padding: 10, verticalAlign: "top" }}>
+                            {item.matched_product} {item.detected_version}
+                          </td>
+                          <td style={{ padding: 10, verticalAlign: "top", minWidth: 240 }}>
+                            {item.description}
+                          </td>
+                          <td style={{ padding: 10, verticalAlign: "top" }}>
+                            <a href={item.url} target="_blank" rel="noopener noreferrer">
+                              NVD
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {result.findings.length === 0 ? (
             <p>No open ports were detected among the selected ports.</p>
