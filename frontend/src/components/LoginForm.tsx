@@ -29,7 +29,7 @@ export default function LoginForm() {
       window.localStorage.setItem(TOKEN_KEY, result.access_token);
       router.replace("/dashboard");
     } catch {
-      setError("Backend nije dostupan. Proveri da li FastAPI radi na portu 8000.");
+      setError("Backend is unavailable. Check whether FastAPI is running on port 8000.");
     } finally {
       setBusy(false);
     }
@@ -40,9 +40,9 @@ export default function LoginForm() {
     <h1>Dobrodošli u CoreWorks</h1>
     <p className="muted">Prijavite se da biste pristupili IT platformi.</p>
     <form onSubmit={submit}>
-      <label htmlFor="username">Korisničko ime</label>
+      <label htmlFor="username">Username</label>
       <input id="username" name="username" value={username} onChange={e => setUsername(e.target.value)} required maxLength={255} autoComplete="username" autoFocus />
-      <label htmlFor="password">Lozinka</label>
+      <label htmlFor="password">Password</label>
       <input id="password" name="password" type="password" value={password} onChange={e => setPassword(e.target.value)} required maxLength={1024} autoComplete="current-password" />
       {error && <p className="error-message" role="alert">{error}</p>}
       <button className="button login-button" type="submit" disabled={busy}>{busy ? "Prijavljivanje…" : "Prijavi se"}</button>

@@ -23,8 +23,8 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 export async function readError(response: Response): Promise<string> {
   try {
     const data = await response.json();
-    return typeof data.detail === "string" ? data.detail : "Zahtev nije uspeo.";
+    return typeof data.detail === "string" ? data.detail : "The request failed.";
   } catch {
-    return "Server trenutno nije dostupan.";
+    return "The server is currently unavailable.";
   }
 }

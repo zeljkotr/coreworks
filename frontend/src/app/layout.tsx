@@ -3,9 +3,9 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CoreWorks Hub",
-  description: "Centralni portal za IT alate i integracije.",
+  description: "Central hub for IT tools and integrations.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="sr"><body>{children}</body></html>;
+  return <html lang="en"><body>{children}</body></html>;
 }

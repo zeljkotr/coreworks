@@ -18,9 +18,10 @@ export default function BrandNav({ user }: { user: User }) {
       <nav className="nav">
         <Link href="/dashboard">Dashboard</Link>
         <Link href="/monitor/status">Monitor</Link>
+        <Link href="/guardian">Guardian</Link>
         {user.role === "admin" && <Link href="/admin">Admin</Link>}
         <span className="user-label">{user.username}</span>
-        <button className="button button-secondary button-small" onClick={logout}>Odjava</button>
+        <button className="button button-secondary button-small" onClick={logout}>Log out</button>
       </nav>
     </header>
   );

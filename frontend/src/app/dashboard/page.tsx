@@ -6,24 +6,24 @@ import type { User } from "@/lib/api";
 
 export default function DashboardPage() {
   return <ProtectedPage>{(user: User) => <>
-    <div className="page-heading">
-      <div className="eyebrow">RADNI PROSTOR</div>
+    <div className="page-heading dashboard-page-heading">
+      <div className="eyebrow">WORKSPACE</div>
       <h1>CoreWorks Hub</h1>
-      <p className="muted">Dobrodošli, {user.username}. Centralni portal za IT alate i integracije.</p>
+      <p className="muted">Welcome, {user.username}. Central hub for IT tools and integrations.</p>
     </div>
     <div className="grid">
       <section className="card">
         <div className="card-icon">M</div>
         <h2>CoreWorks Monitor</h2>
-        <p>Nadzor servera i servisa.</p>
-        <p className="muted">Osnovni modul. Monitoring provere još nisu implementirane.</p>
-        <Link className="text-link" href="/monitor/status">Otvori modul →</Link>
+        <p>Server and service monitoring.</p>
+        <p className="muted">Core module. Monitoring checks are not yet implemented.</p>
+        <Link className="text-link" href="/monitor/status">Open module →</Link>
       </section>
       <section className="card">
         <div className="card-icon">I</div>
-        <h2>Integracije</h2>
-        <p className="muted">Prostor za buduće nezavisne module.</p>
-        <span className="status-pill">U planu</span>
+        <h2>Integrations</h2>
+        <p className="muted">Space for future independent modules.</p>
+        <span className="status-pill">Planned</span>
       </section>
     </div>
   </>}</ProtectedPage>;

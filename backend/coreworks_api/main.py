@@ -5,6 +5,9 @@ from coreworks_api.admin import router as admin_router
 from coreworks_api.auth import router as auth_router
 from coreworks_api.db import engine
 from coreworks_api.monitor import router as monitor_router
+from coreworks_api.monitor_agent import router as monitor_agent_router
+from coreworks_api.local_infrastructure import router as local_infrastructure_router
+from coreworks_api.guardian import router as guardian_router
 
 app = FastAPI(
     title="CoreWorks API",
@@ -27,3 +30,8 @@ def database_health_check() -> dict[str, str]:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
     return {"status": "ok", "database": "connected"}
+
+app.include_router(local_infrastructure_router)
+app.include_router(monitor_agent_router)
+
+app.include_router(guardian_router)
