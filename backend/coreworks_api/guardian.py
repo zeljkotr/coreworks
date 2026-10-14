@@ -71,15 +71,14 @@ def parse_target(target: str) -> list[str]:
     if network.num_addresses > 256:
         raise ValueError("A scan may contain at most 256 IP addresses.")
 
+    if network.network_address.is_global and network.prefixlen != network.max_prefixlen:
+        raise ValueError("Public targets must be a single IP address; public CIDR ranges are not accepted.")
+
     hosts = list(network.hosts())
     if not hosts:
         hosts = [network.network_address]
 
     for address in hosts:
-        if address.is_global:
-            raise ValueError(
-                "Public IP addresses are not accepted. Scan an authorized private or internal network."
-            )
         if address.is_multicast or address.is_unspecified:
             raise ValueError("Multicast and unspecified addresses cannot be scanned.")
 

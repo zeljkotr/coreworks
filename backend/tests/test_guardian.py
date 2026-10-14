@@ -12,9 +12,13 @@ def test_parse_private_cidr():
     assert hosts == ["192.168.2.1", "192.168.2.2"]
 
 
-def test_reject_public_target():
-    with pytest.raises(ValueError, match="Public IP"):
-        parse_target("8.8.8.8")
+def test_accept_public_ip():
+    assert parse_target("8.8.8.8") == ["8.8.8.8"]
+
+
+def test_reject_public_cidr():
+    with pytest.raises(ValueError, match="single IP"):
+        parse_target("8.8.8.0/24")
 
 
 def test_reject_oversized_network():
