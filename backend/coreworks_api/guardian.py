@@ -527,7 +527,7 @@ def _cve_matches_cpe_version(cve: dict, product: str, version: str) -> bool:
 
     configurations = cve.get("configurations")
     if not isinstance(configurations, list) or not configurations:
-        return True
+        return False
 
     def evaluate_entry(entry: dict) -> tuple[bool | None, bool]:
         criteria = entry.get("criteria") or entry.get("cpe23Uri") or ""

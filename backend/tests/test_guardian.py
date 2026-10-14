@@ -234,8 +234,8 @@ def test_guardian_cpe_recurses_into_children():
     assert _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")
 
 
-def test_guardian_cpe_missing_configuration_remains_potential():
-    assert _cve_matches_cpe_version(
+def test_guardian_cpe_missing_configuration_is_rejected():
+    assert not _cve_matches_cpe_version(
         {"id": "CVE-2099-0001"}, "OpenSSH", "10.2p1"
     )
 
