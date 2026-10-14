@@ -463,24 +463,15 @@ def guardian_scan_comparison(
 
 
 
-def _cpe_product_aliases(product: str) -> set[str]:
-    """Return conservative NVD CPE product-name aliases."""
-    import re
+def _normalize_cpe_name(value: str) -> str:
+    """Normalize a detected product or CPE name without vendor-specific rules."""
+    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
 
-    key = re.sub(r"[^a-z0-9]", "", (product or "").lower())
-    aliases = {
-        "openssh": {"openssh"},
-        "nginx": {"nginx"},
-        "apachehttpserver": {"http_server", "apache_http_server"},
-        "microsoftiis": {"internet_information_services", "iis"},
-        "openssl": {"openssl"},
-        "vsftpd": {"vsftpd"},
-        "proftpd": {"proftpd"},
-        "redis": {"redis"},
-        "postgresql": {"postgresql"},
-        "mysql": {"mysql"},
-    }
-    return aliases.get(key, {key} if key else set())
+
+def _cpe_product_aliases(product: str) -> set[str]:
+    """Return generic normalized forms of a detected product name."""
+    normalized = _normalize_cpe_name(product)
+    return {normalized} if normalized else set()
 
 
 def _version_tokens(value: str):
@@ -530,8 +521,9 @@ def _cve_matches_cpe_version(cve: dict, product: str, version: str) -> bool:
     A match is a potential candidate, not confirmation of vulnerability.
     """
     aliases = _cpe_product_aliases(product)
-    if not aliases or not version:
+    if not aliases:
         return False
+    unknown_version = not version or version.strip().lower() == "unknown"
 
     configurations = cve.get("configurations")
     if not isinstance(configurations, list) or not configurations:
@@ -543,12 +535,34 @@ def _cve_matches_cpe_version(cve: dict, product: str, version: str) -> bool:
         if len(parts) < 6:
             return False, False
 
-        cpe_product = parts[4].lower()
+        cpe_vendor = parts[3]
+        cpe_product = parts[4]
         part_type = parts[2].lower()
 
-        if cpe_product in aliases:
+        detected = _normalize_cpe_name(product)
+        cpe_name = _normalize_cpe_name(cpe_product)
+        vendor_and_product = _normalize_cpe_name(cpe_vendor + cpe_product)
+
+        # Require an exact normalized product name, optionally including
+        # the CPE vendor. Avoid substring/token matches between unrelated products.
+        product_matches = detected in {cpe_name, vendor_and_product}
+
+        if product_matches:
             if entry.get("vulnerable") is False:
                 return False, True
+            if unknown_version:
+                criteria_version = parts[5] if len(parts) > 5 else "*"
+                # Unknown installed versions can only match unrestricted CPEs.
+                unrestricted = criteria_version in ("*", "-", "") and not any(
+                    entry.get(field)
+                    for field in (
+                        "versionStartIncluding",
+                        "versionStartExcluding",
+                        "versionEndIncluding",
+                        "versionEndExcluding",
+                    )
+                )
+                return unrestricted, True
             return _version_in_cpe_range(version, entry), True
 
         # We cannot evaluate an OS/hardware condition without host inventory.
@@ -648,7 +662,7 @@ def guardian_scan_vulnerabilities(
     for finding in findings:
         product = (finding.product or "").strip()
         version = (finding.version or "").strip()
-        if not product or not version or version.lower() == "unknown":
+        if not product:
             continue
         key = (product, version)
         if key not in seen:
@@ -663,7 +677,11 @@ def guardian_scan_vulnerabilities(
 
     for product, version in pairs:
         params = urlencode({
-            "keywordSearch": f"{product} {version}",
+            "keywordSearch": (
+                f"{product} {version}"
+                if version and version.lower() != "unknown"
+                else product
+            ),
             "resultsPerPage": 5,
         })
         request = Request(

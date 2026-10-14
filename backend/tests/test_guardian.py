@@ -293,3 +293,57 @@ def test_guardian_cpe_negated_node_is_not_confirmed():
         }]
     }
     assert not _cve_matches_cpe_version(cve, "OpenSSH", "9.6p1")
+
+
+def test_guardian_cpe_unknown_version_only_matches_unrestricted_product():
+    unrestricted = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+                }]
+            }]
+        }]
+    }
+    version_limited = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*",
+                }]
+            }]
+        }]
+    }
+    assert _cve_matches_cpe_version(unrestricted, "OpenSSH", "Unknown")
+    assert not _cve_matches_cpe_version(version_limited, "OpenSSH", "Unknown")
+
+
+def test_guardian_cpe_rejects_partial_product_name_match():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:vendor:nginx:1.26.2:*:*:*:*:*:*:*",
+                }]
+            }]
+        }]
+    }
+    assert not _cve_matches_cpe_version(cve, "nginx-proxy", "1.26.2")
+
+
+def test_guardian_cpe_matches_generic_vendor_plus_product_name():
+    cve = {
+        "configurations": [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "vulnerable": True,
+                    "criteria": "cpe:2.3:a:apache:http_server:2.4.9:*:*:*:*:*:*:*",
+                }]
+            }]
+        }]
+    }
+    assert _cve_matches_cpe_version(cve, "Apache HTTP Server", "2.4.9")
+    assert not _cve_matches_cpe_version(cve, "Apache HTTP Proxy", "2.4.9")
