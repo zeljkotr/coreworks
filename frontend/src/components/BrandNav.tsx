@@ -17,6 +17,7 @@ export default function BrandNav({ user }: { user: User }) {
       <Link className="brand" href="/dashboard">CoreWorks</Link>
       <nav className="nav">
         <Link href="/dashboard">Dashboard</Link>
+        <Link href="/assets">Assets</Link>
         <Link href="/monitor/status">Monitor</Link>
         <Link href="/guardian">Guardian</Link>
         {user.role === "admin" && <Link href="/admin">Admin</Link>}

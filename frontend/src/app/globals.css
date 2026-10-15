@@ -182,3 +182,17 @@ tbody tr:last-child td { border-bottom: 0; }
   .infra-panel { padding: 16px; }
 }
 
+
+/* Site-wide developer attribution */
+.site-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: 18px 20px;
+  margin-top: 28px;
+  border-top: 1px solid var(--border, #263548);
+  color: var(--muted, #94a3b8);
+  font-size: 12px;
+  text-align: center;
+}
